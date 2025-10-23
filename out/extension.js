@@ -1,0 +1,518 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.deactivate = exports.activate = void 0;
+const vscode = require("vscode");
+const snippetManager_1 = require("./snippetManager");
+const treeProvider_1 = require("./treeProvider");
+/**
+ * Resolve dynamic placeholders like {$variable} in snippet content
+ * Prompts user for each placeholder and replaces them.
+ */
+async function resolvePlaceholders(template) {
+    // Find all {$name} placeholders using regex
+    const placeholderRegex = /\{\$(\w+)\}/g;
+    const placeholders = new Map();
+    let match;
+    // Extract unique placeholder names
+    while ((match = placeholderRegex.exec(template)) !== null) {
+        const name = match[1];
+        if (!placeholders.has(name)) {
+            placeholders.set(name, undefined);
+        }
+    }
+    // Prompt user for each placeholder
+    for (const [name] of placeholders) {
+        const value = await vscode.window.showInputBox({
+            prompt: `Masukkan nilai untuk ${name}`,
+            placeHolder: name,
+            validateInput: (val) => {
+                if (val.trim() === '')
+                    return 'Nilai tidak boleh kosong';
+                return null;
+            }
+        });
+        if (value === undefined) {
+            // User cancelled, abort insertion
+            throw new Error('Operasi dibatalkan');
+        }
+        placeholders.set(name, value);
+    }
+    // Replace placeholders in the template
+    let resolved = template;
+    for (const [name, value] of placeholders) {
+        if (value !== undefined) {
+            const regex = new RegExp(`\\{\\$${name}\\}`, 'g');
+            resolved = resolved.replace(regex, value);
+        }
+    }
+    return resolved;
+}
+function activate(context) {
+    const manager = new snippetManager_1.SnippetManager(context);
+    const treeProvider = new treeProvider_1.SnippetsTreeDataProvider(manager);
+    vscode.window.registerTreeDataProvider('rajaSnippetsExplorer', treeProvider);
+    // Register refresh command used by view
+    context.subscriptions.push(vscode.commands.registerCommand('rajaSnippets.refresh', () => treeProvider.refresh()), vscode.commands.registerCommand('rajaSnippets.addSnippetToGroup', async (groupItem) => {
+        const groupName = groupItem.label;
+        const title = await vscode.window.showInputBox({
+            prompt: 'Masukkan judul snippet',
+            placeHolder: 'Snippet Saya'
+        });
+        if (!title) {
+            return;
+        }
+        // Create empty snippet and open a webview editor (no Untitled file)
+        await manager.addSnippet(groupName, title, '', 'code');
+        const snippets = manager.getData().snippets;
+        const newSnippet = snippets[snippets.length - 1];
+        // Open a webview panel to edit the newly created snippet (same UX as edit flow)
+        const panel = vscode.window.createWebviewPanel('rajaSnippetEditor', `Edit: ${newSnippet.title}`, vscode.ViewColumn.One, { enableScripts: true });
+        const escapeHtml = (s) => {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        };
+        panel.webview.html = `<!doctype html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 12px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); }
+          label { display:block; margin-top:8px; font-weight:600 }
+          input[type="text"], textarea, select { width:100%; box-sizing: border-box; padding:8px; margin-top:4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
+          textarea { min-height: 240px; font-family: monospace; white-space: pre; }
+          .row { display:flex; gap:8px; margin-top:12px }
+          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer }
+          button.save { background: var(--vscode-button-background); color: var(--vscode-button-foreground) }
+          button.delete { background: var(--vscode-errorForeground); color: white }
+        </style>
+      </head>
+      <body>
+        <label>Judul</label>
+        <input id="title" type="text" value="${escapeHtml(newSnippet.title)}" />
+
+        <label>Content</label>
+        <textarea id="content">${escapeHtml(newSnippet.content)}</textarea>
+
+        <p style="font-size:11px;margin:0 0 8px 0;color:var(--vscode-descriptionForeground)">
+          Tips: Gunakan placeholder dinamis seperti <code>{$nama}</code> untuk meminta input saat snippet disisipkan/dijalankan.
+        </p>
+
+        <label>Tipe</label>
+        <select id="type">
+          <option value="code" ${newSnippet.type === 'code' ? 'selected' : ''}>Kode</option>
+          <option value="terminal" ${newSnippet.type === 'terminal' ? 'selected' : ''}>Terminal</option>
+        </select>
+
+        <label>Group</label>
+        <select id="group">
+          ${manager.getData().groups.map(g => `<option value="${escapeHtml(g)}" ${g === newSnippet.group ? 'selected' : ''}>${escapeHtml(g)}</option>`).join('')}
+        </select>
+
+        <div class="row">
+          <button class="save">Simpan</button>
+          <button class="insert">Sisipkan</button>
+          <button class="run">Jalankan</button>
+          <button class="delete">Hapus</button>
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+          document.querySelector('.save').addEventListener('click', () => {
+            const title = document.getElementById('title').value;
+            const content = document.getElementById('content').value;
+            const type = document.getElementById('type').value;
+            const group = document.getElementById('group').value;
+            vscode.postMessage({ command: 'save', title, content, type, group });
+          });
+          document.querySelector('.delete').addEventListener('click', () => {
+            vscode.postMessage({ command: 'delete' });
+          });
+        </script>
+      </body>
+      </html>`;
+        const msgDisp = panel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.command === 'save') {
+                await manager.updateSnippet(newSnippet.id, { title: msg.title, content: msg.content, type: msg.type, group: msg.group });
+                vscode.window.showInformationMessage('Snippet telah disimpan.');
+                treeProvider.refresh();
+                panel.dispose();
+            }
+            else if (msg.command === 'insert') {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showErrorMessage('No active editor');
+                    return;
+                }
+                try {
+                    const contentToInsert = await resolvePlaceholders(newSnippet.content);
+                    await editor.edit((editBuilder) => {
+                        editBuilder.insert(editor.selection.active, contentToInsert);
+                    });
+                }
+                catch {
+                    // User cancelled placeholder input; do nothing
+                }
+            }
+            else if (msg.command === 'run') {
+                try {
+                    const commandToRun = await resolvePlaceholders(newSnippet.content);
+                    const term = vscode.window.activeTerminal ?? vscode.window.createTerminal('Raja Snippets');
+                    term.show(true);
+                    term.sendText(commandToRun, true);
+                }
+                catch {
+                    // User cancelled placeholder input; do nothing
+                }
+            }
+            else if (msg.command === 'delete') {
+                const confirm = await vscode.window.showWarningMessage(`Hapus snippet '${newSnippet.title}'?`, 'Hapus', 'Batal');
+                if (confirm === 'Hapus') {
+                    await manager.deleteSnippet(newSnippet.id);
+                    vscode.window.showInformationMessage('Snippet telah dihapus.');
+                    treeProvider.refresh();
+                    panel.dispose();
+                }
+            }
+        });
+        panel.onDidDispose(() => msgDisp.dispose());
+    }), vscode.commands.registerCommand('rajaSnippets.addGroupInline', async () => {
+        const name = await vscode.window.showInputBox({ prompt: 'Group name' });
+        if (!name) {
+            return;
+        }
+        await manager.addGroup(name);
+        vscode.window.showInformationMessage(`Group '${name}' created.`);
+        treeProvider.refresh();
+    }), vscode.commands.registerCommand('rajaSnippets.deleteGroupFromTree', async (groupItem) => {
+        const confirm = await vscode.window.showWarningMessage(`Delete group '${groupItem.label}' and all its snippets?`, 'Delete', 'Cancel');
+        if (confirm === 'Delete') {
+            await manager.deleteGroup(groupItem.label);
+            vscode.window.showInformationMessage(`Group '${groupItem.label}' deleted.`);
+            treeProvider.refresh();
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('rajaSnippets.addGroup', async () => {
+        const name = await vscode.window.showInputBox({ prompt: 'Group name' });
+        if (!name) {
+            return;
+        }
+        await manager.addGroup(name);
+        vscode.window.showInformationMessage(`Group '${name}' created.`);
+        treeProvider.refresh();
+    }), vscode.commands.registerCommand('rajaSnippets.addSnippet', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('Open a file and select text to save as snippet');
+            return;
+        }
+        const selection = editor.selection;
+        const text = editor.document.getText(selection) || editor.document.getText();
+        const title = await vscode.window.showInputBox({ prompt: 'Snippet title' });
+        if (!title) {
+            return;
+        }
+        const group = await manager.pickGroup();
+        if (!group) {
+            return;
+        }
+        const type = 'code'; // Default new snippets from editor are code type
+        await manager.addSnippet(group, title, text, type);
+        vscode.window.showInformationMessage(`Snippet '${title}' saved to '${group}'.`);
+        treeProvider.refresh();
+    }), vscode.commands.registerCommand('rajaSnippets.insertSnippet', async (item) => {
+        let snippet;
+        if (item?.snippet) {
+            snippet = item.snippet;
+        }
+        else {
+            // Filter hanya snippet tipe code untuk quick pick
+            const codeSnippets = manager.getData().snippets.filter(s => s.type === 'code');
+            const pick = await vscode.window.showQuickPick(codeSnippets.map(s => ({ label: s.title, snippet: s })), { placeHolder: 'Pilih snippet kode' });
+            if (!pick) {
+                return;
+            }
+            snippet = pick.snippet;
+        }
+        if (!snippet) {
+            return;
+        }
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor');
+            return;
+        }
+        const contentToInsert = await resolvePlaceholders(snippet.content);
+        await editor.edit((editBuilder) => {
+            editBuilder.insert(editor.selection.active, contentToInsert);
+        });
+    }), vscode.commands.registerCommand('rajaSnippets.runSnippet', async (item) => {
+        let snippet;
+        if (item?.snippet) {
+            snippet = item.snippet;
+        }
+        else {
+            // Filter hanya snippet tipe terminal untuk quick pick
+            const terminalSnippets = manager.getData().snippets.filter(s => s.type === 'terminal');
+            const pick = await vscode.window.showQuickPick(terminalSnippets.map(s => ({ label: s.title, snippet: s })), { placeHolder: 'Pilih perintah terminal' });
+            if (!pick) {
+                return;
+            }
+            snippet = pick.snippet;
+        }
+        if (!snippet) {
+            return;
+        }
+        const term = vscode.window.activeTerminal ?? vscode.window.createTerminal('Raja Snippets');
+        term.show(true);
+        const commandToRun = await resolvePlaceholders(snippet.content);
+        term.sendText(commandToRun, true);
+    }), vscode.commands.registerCommand('rajaSnippets.listSnippets', async () => {
+        const items = manager.listAll();
+        const pick = await vscode.window.showQuickPick(items.map((i) => ({ label: i.title, snippet: i })), { placeHolder: 'Select snippet' });
+        if (!pick) {
+            return;
+        }
+        const s = pick.snippet || manager.findByTitle(pick.label);
+        if (s && vscode.window.activeTextEditor) {
+            await vscode.window.activeTextEditor.insertSnippet(new vscode.SnippetString(s.content));
+        }
+    }), vscode.commands.registerCommand('rajaSnippets.editOrDeleteSnippet', async (item) => {
+        const snippet = item?.snippet;
+        if (!snippet) {
+            return;
+        }
+        // Create a webview panel to edit the snippet with a small form
+        const panel = vscode.window.createWebviewPanel('rajaSnippetEditor', `Edit: ${snippet.title}`, vscode.ViewColumn.One, { enableScripts: true });
+        const escapeHtml = (s) => {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        };
+        panel.webview.html = `<!doctype html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; padding: 12px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); }
+          label { display:block; margin-top:8px; font-weight:600 }
+          input[type="text"], textarea, select { width:100%; box-sizing: border-box; padding:8px; margin-top:4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
+          textarea { min-height: 240px; font-family: monospace; white-space: pre; }
+          .row { display:flex; gap:8px; margin-top:12px }
+          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer }
+          button.save { background: var(--vscode-button-background); color: var(--vscode-button-foreground) }
+          button.delete { background: var(--vscode-errorForeground); color: white }
+        </style>
+      </head>
+      <body>
+        <label>Judul</label>
+        <input id="title" type="text" value="${escapeHtml(snippet.title)}" />
+
+        <label>Content</label>
+        <textarea id="content">${escapeHtml(snippet.content)}</textarea>
+
+        <p style="font-size:11px;margin:0 0 8px 0;color:var(--vscode-descriptionForeground)">
+          Tips: Gunakan placeholder dinamis seperti <code>{$nama}</code> untuk meminta input saat snippet disisipkan/dijalankan.
+        </p>
+
+        <label>Tipe</label>
+        <select id="type">
+          <option value="code" ${snippet.type === 'code' ? 'selected' : ''}>Kode</option>
+          <option value="terminal" ${snippet.type === 'terminal' ? 'selected' : ''}>Terminal</option>
+        </select>
+
+        <label>Group</label>
+        <select id="group">
+          ${manager.getData().groups.map(g => `<option value="${escapeHtml(g)}" ${g === snippet.group ? 'selected' : ''}>${escapeHtml(g)}</option>`).join('')}
+        </select>
+
+        <div class="row">
+          <button class="save">Simpan</button>
+          <button class="insert">Sisipkan</button>
+          <button class="run">Jalankan</button>
+          <button class="delete">Hapus</button>
+        </div>
+
+        <script>
+          const vscode = acquireVsCodeApi();
+          document.querySelector('.save').addEventListener('click', () => {
+            const title = document.getElementById('title').value;
+            const content = document.getElementById('content').value;
+            const type = document.getElementById('type').value;
+            const group = document.getElementById('group').value;
+            vscode.postMessage({ command: 'save', title, content, type, group });
+          });
+          document.querySelector('.insert').addEventListener('click', () => {
+            vscode.postMessage({ command: 'insert' });
+          });
+          document.querySelector('.run').addEventListener('click', () => {
+            vscode.postMessage({ command: 'run' });
+          });
+          document.querySelector('.delete').addEventListener('click', () => {
+            vscode.postMessage({ command: 'delete' });
+          });
+        </script>
+      </body>
+      </html>`;
+        const msgDisp = panel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg.command === 'save') {
+                await manager.updateSnippet(snippet.id, { title: msg.title, content: msg.content, type: msg.type, group: msg.group });
+                vscode.window.showInformationMessage('Snippet telah diperbarui.');
+                treeProvider.refresh();
+                panel.dispose();
+            }
+            else if (msg.command === 'insert') {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showErrorMessage('No active editor');
+                    return;
+                }
+                try {
+                    const contentToInsert = await resolvePlaceholders(snippet.content);
+                    await editor.edit((editBuilder) => {
+                        editBuilder.insert(editor.selection.active, contentToInsert);
+                    });
+                }
+                catch {
+                    // User cancelled placeholder input; do nothing
+                }
+            }
+            else if (msg.command === 'run') {
+                try {
+                    const commandToRun = await resolvePlaceholders(snippet.content);
+                    const term = vscode.window.activeTerminal ?? vscode.window.createTerminal('Raja Snippets');
+                    term.show(true);
+                    term.sendText(commandToRun, true);
+                }
+                catch {
+                    // User cancelled placeholder input; do nothing
+                }
+            }
+            else if (msg.command === 'delete') {
+                const confirm = await vscode.window.showWarningMessage(`Hapus snippet '${snippet.title}'?`, 'Hapus', 'Batal');
+                if (confirm === 'Hapus') {
+                    await manager.deleteSnippet(snippet.id);
+                    vscode.window.showInformationMessage('Snippet telah dihapus.');
+                    treeProvider.refresh();
+                    panel.dispose();
+                }
+            }
+        });
+        panel.onDidDispose(() => msgDisp.dispose());
+    }), vscode.commands.registerCommand('rajaSnippets.changeSnippetType', async (item) => {
+        const snippet = item?.snippet;
+        if (!snippet) {
+            return;
+        }
+        const newType = await vscode.window.showQuickPick([
+            { label: '$(code) Snippet Kode', value: 'code' },
+            { label: '$(terminal) Perintah Terminal', value: 'terminal' }
+        ], { placeHolder: 'Pilih tipe snippet' });
+        if (newType && newType.value !== snippet.type) {
+            await manager.updateSnippet(snippet.id, { type: newType.value });
+            vscode.window.showInformationMessage('Tipe snippet telah diperbarui.');
+            treeProvider.refresh();
+        }
+    }), 
+    // Show snippet actions as a QuickPick (clickable icons) — alternative to inline hover-icons
+    vscode.commands.registerCommand('rajaSnippets.showSnippetActions', async (item) => {
+        const snippet = item?.snippet;
+        if (!snippet) {
+            return;
+        }
+        const picks = [
+            { label: '$(insert) Sisipkan', description: 'Sisipkan snippet pada kursor', action: 'insert' },
+            { label: '$(terminal) Jalankan', description: 'Jalankan di terminal', action: 'run' },
+            { label: '$(edit) Edit', description: 'Edit snippet', action: 'edit' },
+            { label: '$(trash) Hapus', description: 'Hapus snippet', action: 'delete' }
+        ];
+        const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Pilih aksi untuk snippet' });
+        if (!pick) {
+            return;
+        }
+        switch (pick.action) {
+            case 'insert':
+                await vscode.commands.executeCommand('rajaSnippets.insertSnippet', { snippet });
+                break;
+            case 'run':
+                await vscode.commands.executeCommand('rajaSnippets.runSnippet', { snippet });
+                break;
+            case 'edit':
+                await vscode.commands.executeCommand('rajaSnippets.editOrDeleteSnippet', { snippet });
+                break;
+            case 'delete':
+                const confirm = await vscode.window.showWarningMessage(`Hapus snippet '${snippet.title}'?`, 'Hapus', 'Batal');
+                if (confirm === 'Hapus') {
+                    await manager.deleteSnippet(snippet.id);
+                    vscode.window.showInformationMessage('Snippet telah dihapus.');
+                    treeProvider.refresh();
+                }
+                break;
+        }
+    }), vscode.commands.registerCommand('rajaSnippets.deleteGroup', async () => {
+        const group = await manager.pickGroup();
+        if (!group) {
+            return;
+        }
+        const confirm = await vscode.window.showWarningMessage(`Delete group '${group}' and all its snippets?`, 'Delete', 'Cancel');
+        if (confirm === 'Delete') {
+            await manager.deleteGroup(group);
+            vscode.window.showInformationMessage(`Group '${group}' deleted.`);
+            treeProvider.refresh();
+        }
+    }), vscode.commands.registerCommand('rajaSnippets.deleteSnippet', async (item) => {
+        const snippet = item?.snippet;
+        if (!snippet) {
+            return;
+        }
+        const confirm = await vscode.window.showWarningMessage(`Hapus snippet '${snippet.title}'?`, 'Hapus', 'Batal');
+        if (confirm === 'Hapus') {
+            await manager.deleteSnippet(snippet.id);
+            vscode.window.showInformationMessage('Snippet telah dihapus.');
+            treeProvider.refresh();
+        }
+    }), vscode.commands.registerCommand('rajaSnippets.exportJson', async () => {
+        const json = manager.exportAsJson();
+        const uri = await vscode.window.showSaveDialog({ filters: { JSON: ['json'] }, defaultUri: vscode.Uri.file('snippets.json') });
+        if (!uri) {
+            return;
+        }
+        const encoder = new TextEncoder();
+        await vscode.workspace.fs.writeFile(uri, encoder.encode(json));
+        vscode.window.showInformationMessage('Snippet berhasil diekspor.');
+    }), vscode.commands.registerCommand('rajaSnippets.importJson', async () => {
+        const uri = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { JSON: ['json'] } });
+        if (!uri) {
+            return;
+        }
+        const bytes = await vscode.workspace.fs.readFile(uri[0]);
+        const decoder = new TextDecoder();
+        const json = decoder.decode(bytes);
+        try {
+            await manager.importFromJson(json);
+            vscode.window.showInformationMessage('Snippet berhasil diimpor.');
+            treeProvider.refresh();
+        }
+        catch (e) {
+            vscode.window.showErrorMessage('Impor gagal. Format JSON tidak valid.');
+        }
+    }));
+    // New storage commands
+    context.subscriptions.push(vscode.commands.registerCommand('rajaSnippets.openStorage', async () => {
+        await manager.openStorage();
+    }), vscode.commands.registerCommand('rajaSnippets.showStoragePath', async () => {
+        const p = manager.getDataFilePath();
+        vscode.window.showInformationMessage(`Snippets storage: ${p}`);
+    }), vscode.commands.registerCommand('rajaSnippets.configureStorage', async () => {
+        const uri = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Pilih folder untuk menyimpan snippets' });
+        if (!uri || uri.length === 0) {
+            return;
+        }
+        const folder = uri[0].fsPath;
+        await manager.setStoragePath(folder);
+        vscode.window.showInformationMessage(`Snippets storage diset ke: ${folder}`);
+        treeProvider.refresh();
+    }));
+}
+exports.activate = activate;
+function deactivate() { }
+exports.deactivate = deactivate;
+//# sourceMappingURL=extension.js.map

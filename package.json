@@ -1,0 +1,226 @@
+{
+  "name": "raja-snippets-manager",
+  "publisher": "myname",
+  "displayName": "Raja Snippets Manager",
+  "description": "Manage snippets: groups, insert at cursor, run in terminal",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "activationEvents": [
+    "onCommand:rajaSnippets.addGroup",
+    "onCommand:rajaSnippets.addSnippet",
+    "onCommand:rajaSnippets.insertSnippet",
+    "onCommand:rajaSnippets.runSnippet",
+    "onCommand:rajaSnippets.listSnippets"
+  ],
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "package": "npx @vscode/vsce package",
+    "publish": "npx @vscode/vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.22",
+    "@types/vscode": "^1.60.0",
+    "tslint": "^6.1.3",
+    "typescript": "^4.4.3"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "rajaSnippets.addGroup",
+        "title": "Raja Snippets: Add Group"
+      },
+      {
+        "command": "rajaSnippets.addSnippet",
+        "title": "Raja Snippets: Add Snippet from Selection"
+      },
+      {
+        "command": "rajaSnippets.insertSnippet",
+        "title": "Sisip"
+      },
+      {
+        "command": "rajaSnippets.runSnippet",
+        "title": "Jalankan"
+      },
+      {
+        "command": "rajaSnippets.listSnippets",
+        "title": "Daftar"
+      },
+      {
+        "command": "rajaSnippets.editOrDeleteSnippet",
+        "title": "Edit"
+      },
+      {
+        "command": "rajaSnippets.showSnippetActions",
+        "title": "Tampilkan Aksi Snippet"
+      },
+      {
+        "command": "rajaSnippets.deleteSnippet",
+        "title": "Hapus"
+      },
+      {
+        "command": "rajaSnippets.addSnippetToGroup",
+        "title": "Add Snippet to This Group",
+        "icon": "$(add)"
+      },
+      {
+        "command": "rajaSnippets.deleteGroupFromTree",
+        "title": "Delete Group",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "rajaSnippets.addGroupInline",
+        "title": "Add Group",
+        "icon": "$(folder-new)"
+      },
+      {
+        "command": "rajaSnippets.deleteGroup",
+        "title": "Raja Snippets: Delete Group"
+      },
+      {
+        "command": "rajaSnippets.exportJson",
+        "title": "Raja Snippets: Export to JSON"
+      },
+      {
+        "command": "rajaSnippets.importJson",
+        "title": "Raja Snippets: Import from JSON"
+      },
+      {
+        "command": "rajaSnippets.refresh",
+        "title": "Raja Snippets: Refresh"
+      },
+      {
+        "command": "rajaSnippets.changeSnippetType",
+        "title": "Ganti Tipe"
+      }
+      ,
+      {
+        "command": "rajaSnippets.openStorage",
+        "title": "Buka Storage"
+      },
+      {
+        "command": "rajaSnippets.showStoragePath",
+        "title": "Tampilkan Lokasi Storage"
+      },
+      {
+        "command": "rajaSnippets.configureStorage",
+        "title": "Atur Lokasi Storage"
+      }
+    ],
+    "views": {
+      "rajaSnippets": [
+        {
+          "id": "rajaSnippetsExplorer",
+          "name": "Snippets",
+          "when": "workspaceFolderCount > 0"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rajaSnippets",
+          "title": "Raja Snippets",
+          "icon": "$(file-code)"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "rajaSnippets.addGroupInline",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "inline",
+          "icon": "$(new-folder)"
+        }
+        ,
+        {
+          "command": "rajaSnippets.configureStorage",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "inline",
+          "icon": "$(gear)"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "rajaSnippets.insertSnippet",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
+          "group": "inline@1",
+          "icon": "$(insert)"
+        },
+        {
+          "command": "rajaSnippets.runSnippet",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
+          "group": "inline@1",
+          "icon": "$(terminal)"
+        },
+        {
+          "command": "rajaSnippets.editOrDeleteSnippet",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
+          "group": "navigation",
+          "icon": "$(edit)"
+        },
+        {
+          "command": "rajaSnippets.deleteSnippet",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
+          "group": "navigation",
+          "icon": "$(trash)"
+        },
+        {
+          "command": "rajaSnippets.changeSnippetType",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
+          "group": "navigation",
+          "icon": "$(symbol-enum)"
+        },
+        {
+          "command": "rajaSnippets.addSnippetToGroup",
+          "when": "view == rajaSnippetsExplorer && viewItem == group",
+          "group": "inline@1",
+          "icon": "$(add)"
+        },
+        {
+          "command": "rajaSnippets.deleteGroupFromTree",
+          "when": "view == rajaSnippetsExplorer && viewItem == group",
+          "group": "inline@2",
+          "icon": "$(trash)"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "rajaSnippets.refresh",
+          "when": "false"
+        },
+        {
+          "command": "rajaSnippets.addSnippetToGroup",
+          "when": "false"
+        },
+        {
+          "command": "rajaSnippets.deleteGroupFromTree",
+          "when": "false"
+        },
+        {
+          "command": "rajaSnippets.addGroupInline",
+          "when": "false"
+        }
+      ]
+    }
+    ,
+    "configuration": {
+      "type": "object",
+      "title": "Raja Snippets Manager",
+      "properties": {
+        "rajaSnippetsManager.storagePath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom folder path to store snippets.json. If empty, the extension uses the globalStorage folder."
+        }
+      }
+    }
+  }
+}
