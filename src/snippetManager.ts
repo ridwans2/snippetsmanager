@@ -2,8 +2,11 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
-declare const TextEncoder: any;
-declare const TextDecoder: any;
+// TextEncoder and TextDecoder are built-in in modern Node.js
+declare global {
+  interface TextEncoder {}
+  interface TextDecoder {}
+}
 
 export type SnippetType = 'terminal' | 'code';
 
@@ -38,18 +41,31 @@ export class SnippetManager {
     if (!newDir) { return; }
     fs.mkdirSync(newDir, { recursive: true });
     const newFile = path.join(newDir, 'snippets.json');
-    // If current file exists, copy it to new location
-    if (fs.existsSync(this.dataFile)) {
+    
+    // If current file exists and new file doesn't exist, copy it to new location
+    if (fs.existsSync(this.dataFile) && !fs.existsSync(newFile)) {
       try {
         fs.copyFileSync(this.dataFile, newFile);
       } catch (e) {
         // ignore copy errors, will write default below if needed
       }
     }
-    // Ensure there's a file at newFile
-    if (!fs.existsSync(newFile)) {
+    
+    // If new file already exists, use it instead of overwriting
+    if (fs.existsSync(newFile)) {
+      // Check if the existing file has valid data
+      try {
+        const content = fs.readFileSync(newFile, 'utf8');
+        JSON.parse(content); // Just to validate it's valid JSON
+      } catch (e) {
+        // If invalid JSON, create a new default file
+        fs.writeFileSync(newFile, JSON.stringify({ groups: ['default'], snippets: [] }, null, 2));
+      }
+    } else {
+      // Ensure there's a file at newFile
       fs.writeFileSync(newFile, JSON.stringify({ groups: ['default'], snippets: [] }, null, 2));
     }
+    
     this.dataFile = newFile;
     // Persist choice in user settings
     await vscode.workspace.getConfiguration('rajaSnippetsManager').update('storagePath', newDir, vscode.ConfigurationTarget.Global);
@@ -218,6 +234,16 @@ public getSnippetEditorHtml(snippet: { title: string; content: string; type: Sni
         </body>
         </html>
     `;
-}
-
   }
+
+  async importSnippets(snippets: SnippetRecord[]): Promise<void> {
+    const data = this.getData();
+    data.snippets.push(...snippets);
+    await this.saveData(data);
+  }
+
+  async replaceSnippets(snippets: SnippetRecord[]): Promise<void> {
+    const data = this.getData();
+    data.snippets = snippets;
+    await this.saveData(data);
+  }  }

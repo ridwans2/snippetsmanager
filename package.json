@@ -3,7 +3,11 @@
   "publisher": "myname",
   "displayName": "Raja Snippets Manager",
   "description": "Manage snippets: groups, insert at cursor, run in terminal",
-  "version": "0.0.1",
+  "version": "1.2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ridwans2/raja-snippets-manager.git"
+  },
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -12,7 +16,26 @@
     "onCommand:rajaSnippets.addSnippet",
     "onCommand:rajaSnippets.insertSnippet",
     "onCommand:rajaSnippets.runSnippet",
-    "onCommand:rajaSnippets.listSnippets"
+    "onCommand:rajaSnippets.listSnippets",
+    "onCommand:rajaSnippets.exportSnippets",
+    "onCommand:rajaSnippets.importSnippets",
+    "onCommand:rajaSnippets.editOrDeleteSnippet",
+    "onCommand:rajaSnippets.showSnippetActions",
+    "onCommand:rajaSnippets.deleteSnippet",
+    "onCommand:rajaSnippets.addSnippetToGroup",
+    "onCommand:rajaSnippets.deleteGroupFromTree",
+    "onCommand:rajaSnippets.addGroupInline",
+    "onCommand:rajaSnippets.deleteGroup",
+    "onCommand:rajaSnippets.exportJson",
+    "onCommand:rajaSnippets.importJson",
+    "onCommand:rajaSnippets.refresh",
+    "onCommand:rajaSnippets.changeSnippetType",
+    "onCommand:rajaSnippets.openStorage",
+    "onCommand:rajaSnippets.showStoragePath",
+    "onCommand:rajaSnippets.configureStorage",
+    "onCommand:rajaSnippets.showAllSnippetActions",
+    "onCommand:rajaSnippets.showGroupActions",
+    "onView:rajaSnippetsExplorer"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -42,15 +65,23 @@
       },
       {
         "command": "rajaSnippets.insertSnippet",
-        "title": "Sisip"
+        "title": "+ Sisipkan"
       },
       {
         "command": "rajaSnippets.runSnippet",
-        "title": "Jalankan"
+        "title": "Terminal >"
       },
       {
         "command": "rajaSnippets.listSnippets",
         "title": "Daftar"
+      },
+      {
+        "command": "rajaSnippets.exportSnippets",
+        "title": "Export Snippets"
+      },
+      {
+        "command": "rajaSnippets.importSnippets",
+        "title": "Import Snippets"
       },
       {
         "command": "rajaSnippets.editOrDeleteSnippet",
@@ -111,6 +142,16 @@
       {
         "command": "rajaSnippets.configureStorage",
         "title": "Atur Lokasi Storage"
+      },
+      {
+        "command": "rajaSnippets.showAllSnippetActions",
+        "title": "Tampilkan Semua Aksi",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "rajaSnippets.showGroupActions",
+        "title": "Tampilkan Aksi Grup",
+        "icon": "$(gear)"
       }
     ],
     "views": {
@@ -118,7 +159,9 @@
         {
           "id": "rajaSnippetsExplorer",
           "name": "Snippets",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount > 0",
+          "icon": "$(file-code)",
+          "contextualTitle": "Raja Snippets"
         }
       ]
     },
@@ -145,38 +188,56 @@
           "when": "view == rajaSnippetsExplorer",
           "group": "inline",
           "icon": "$(gear)"
+        },
+        {
+          "command": "rajaSnippets.exportSnippets",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "inline",
+          "icon": "$(export)"
+        },
+        {
+          "command": "rajaSnippets.importSnippets",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "inline",
+          "icon": "$(import)"
+        },
+        {
+          "command": "rajaSnippets.refresh",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "inline",
+          "icon": "$(refresh)"
         }
       ],
       "view/item/context": [
         {
           "command": "rajaSnippets.insertSnippet",
           "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
-          "group": "inline@1",
+          "group": "1@1",
           "icon": "$(insert)"
         },
         {
           "command": "rajaSnippets.runSnippet",
           "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
-          "group": "inline@1",
-          "icon": "$(terminal)"
+          "group": "1@2",
+          "icon": "$(run)"
         },
         {
           "command": "rajaSnippets.editOrDeleteSnippet",
-          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
-          "group": "navigation",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
+          "group": "1@3",
           "icon": "$(edit)"
         },
         {
-          "command": "rajaSnippets.deleteSnippet",
-          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
-          "group": "navigation",
-          "icon": "$(trash)"
+          "command": "rajaSnippets.changeSnippetType",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
+          "group": "2@1",
+          "icon": "$(symbol-enum)"
         },
         {
-          "command": "rajaSnippets.changeSnippetType",
-          "when": "view == rajaSnippetsExplorer && viewItem =~ \/snippet-.*$\/",
-          "group": "navigation",
-          "icon": "$(symbol-enum)"
+          "command": "rajaSnippets.deleteSnippet",
+          "when": "view == rajaSnippetsExplorer && viewItem =~ /snippet-.*$/",
+          "group": "2@2",
+          "icon": "$(trash)"
         },
         {
           "command": "rajaSnippets.addSnippetToGroup",
@@ -185,10 +246,22 @@
           "icon": "$(add)"
         },
         {
+          "command": "rajaSnippets.showGroupActions",
+          "when": "view == rajaSnippetsExplorer && viewItem == group",
+          "group": "1@2",
+          "icon": "$(gear)"
+        },
+        {
           "command": "rajaSnippets.deleteGroupFromTree",
           "when": "view == rajaSnippetsExplorer && viewItem == group",
-          "group": "inline@2",
+          "group": "1@3",
           "icon": "$(trash)"
+        },
+        {
+          "command": "rajaSnippets.refresh",
+          "when": "view == rajaSnippetsExplorer",
+          "group": "navigation",
+          "icon": "$(refresh)"
         }
       ],
       "commandPalette": [
@@ -206,6 +279,14 @@
         },
         {
           "command": "rajaSnippets.addGroupInline",
+          "when": "false"
+        },
+        {
+          "command": "rajaSnippets.showAllSnippetActions",
+          "when": "false"
+        },
+        {
+          "command": "rajaSnippets.showGroupActions",
           "when": "false"
         }
       ]

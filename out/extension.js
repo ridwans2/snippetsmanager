@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode = require("vscode");
+const fs = require("fs");
 const snippetManager_1 = require("./snippetManager");
 const treeProvider_1 = require("./treeProvider");
 /**
@@ -53,7 +54,8 @@ function activate(context) {
     vscode.window.registerTreeDataProvider('rajaSnippetsExplorer', treeProvider);
     // Register refresh command used by view
     context.subscriptions.push(vscode.commands.registerCommand('rajaSnippets.refresh', () => treeProvider.refresh()), vscode.commands.registerCommand('rajaSnippets.addSnippetToGroup', async (groupItem) => {
-        const groupName = groupItem.label;
+        // Perbaikan: Mendapatkan nama grup dengan benar
+        const groupName = typeof groupItem.label === 'string' ? groupItem.label : groupItem.label.label;
         const title = await vscode.window.showInputBox({
             prompt: 'Masukkan judul snippet',
             placeHolder: 'Snippet Saya'
@@ -65,6 +67,8 @@ function activate(context) {
         await manager.addSnippet(groupName, title, '', 'code');
         const snippets = manager.getData().snippets;
         const newSnippet = snippets[snippets.length - 1];
+        // Refresh tree view segera setelah menambah snippet
+        treeProvider.refresh();
         // Open a webview panel to edit the newly created snippet (same UX as edit flow)
         const panel = vscode.window.createWebviewPanel('rajaSnippetEditor', `Edit: ${newSnippet.title}`, vscode.ViewColumn.One, { enableScripts: true });
         const escapeHtml = (s) => {
@@ -81,8 +85,10 @@ function activate(context) {
           input[type="text"], textarea, select { width:100%; box-sizing: border-box; padding:8px; margin-top:4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
           textarea { min-height: 240px; font-family: monospace; white-space: pre; }
           .row { display:flex; gap:8px; margin-top:12px }
-          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer }
+          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer; display: flex; align-items: center; gap: 4px; }
           button.save { background: var(--vscode-button-background); color: var(--vscode-button-foreground) }
+          button.insert { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground) }
+          button.run { background: var(--vscode-terminal-background); color: var(--vscode-terminal-foreground) }
           button.delete { background: var(--vscode-errorForeground); color: white }
         </style>
       </head>
@@ -109,14 +115,46 @@ function activate(context) {
         </select>
 
         <div class="row">
-          <button class="save">Simpan</button>
-          <button class="insert">Sisipkan</button>
-          <button class="run">Jalankan</button>
-          <button class="delete">Hapus</button>
+          <button class="save" title="Simpan">💾 Simpan</button>
+          <button id="insertBtn" class="insert" style="display: ${newSnippet.type === 'code' ? 'flex' : 'none'}" title="Sisipkan">+ Sisipkan</button>
+          <button id="runBtn" class="run" style="display: ${newSnippet.type === 'terminal' ? 'flex' : 'none'}" title="Terminal"> Terminal ></button>
+          <button class="delete" title="Hapus">🗑️ Hapus</button>
         </div>
 
         <script>
           const vscode = acquireVsCodeApi();
+          
+          // Debug: Log initial type
+          console.log('Initial type:', document.getElementById('type')?.value);
+          
+          // Fungsi untuk mengubah tampilan tombol berdasarkan tipe
+          function updateButtonsVisibility(type) {
+            console.log('Updating buttons visibility for type:', type);
+            const insertBtn = document.querySelector('#insertBtn');
+            const runBtn = document.querySelector('#runBtn');
+            
+            if (insertBtn) {
+              insertBtn.style.display = type === 'code' ? 'flex' : 'none';
+              console.log('Insert button visibility:', type === 'code' ? 'flex' : 'none');
+            }
+            if (runBtn) {
+              runBtn.style.display = type === 'terminal' ? 'flex' : 'none';
+              console.log('Run button visibility:', type === 'terminal' ? 'flex' : 'none');
+            }
+          }
+          
+          // Event listener untuk perubahan tipe
+          const typeSelect = document.getElementById('type');
+          if (typeSelect) {
+            typeSelect.addEventListener('change', (e) => {
+              console.log('Type changed to:', e.target.value);
+              updateButtonsVisibility(e.target.value);
+            });
+            
+            // Initialize visibility based on current type
+            updateButtonsVisibility(typeSelect.value);
+          }
+          
           document.querySelector('.save').addEventListener('click', () => {
             const title = document.getElementById('title').value;
             const content = document.getElementById('content').value;
@@ -124,6 +162,21 @@ function activate(context) {
             const group = document.getElementById('group').value;
             vscode.postMessage({ command: 'save', title, content, type, group });
           });
+          
+          const insertBtn = document.querySelector('#insertBtn');
+          if (insertBtn) {
+            insertBtn.addEventListener('click', () => {
+              vscode.postMessage({ command: 'insert' });
+            });
+          }
+          
+          const runBtn = document.querySelector('#runBtn');
+          if (runBtn) {
+            runBtn.addEventListener('click', () => {
+              vscode.postMessage({ command: 'run' });
+            });
+          }
+          
           document.querySelector('.delete').addEventListener('click', () => {
             vscode.postMessage({ command: 'delete' });
           });
@@ -184,10 +237,12 @@ function activate(context) {
         vscode.window.showInformationMessage(`Group '${name}' created.`);
         treeProvider.refresh();
     }), vscode.commands.registerCommand('rajaSnippets.deleteGroupFromTree', async (groupItem) => {
-        const confirm = await vscode.window.showWarningMessage(`Delete group '${groupItem.label}' and all its snippets?`, 'Delete', 'Cancel');
-        if (confirm === 'Delete') {
-            await manager.deleteGroup(groupItem.label);
-            vscode.window.showInformationMessage(`Group '${groupItem.label}' deleted.`);
+        // Perbaikan: Mendapatkan nama grup dengan benar
+        const groupName = typeof groupItem.label === 'string' ? groupItem.label : groupItem.label.label;
+        const confirmation = await vscode.window.showWarningMessage(`Apakah Anda yakin ingin menghapus grup '${groupName}'? Semua snippet di dalamnya akan ikut terhapus.`, { modal: true }, 'Hapus');
+        if (confirmation === 'Hapus') {
+            await manager.deleteGroup(groupName);
+            vscode.window.showInformationMessage(`Group '${groupName}' deleted.`);
             treeProvider.refresh();
         }
     }));
@@ -227,7 +282,7 @@ function activate(context) {
         else {
             // Filter hanya snippet tipe code untuk quick pick
             const codeSnippets = manager.getData().snippets.filter(s => s.type === 'code');
-            const pick = await vscode.window.showQuickPick(codeSnippets.map(s => ({ label: s.title, snippet: s })), { placeHolder: 'Pilih snippet kode' });
+            const pick = await vscode.window.showQuickPick(codeSnippets.map(s => ({ label: s.title, description: s.group, snippet: s })), { placeHolder: 'Pilih snippet kode' });
             if (!pick) {
                 return;
             }
@@ -253,7 +308,7 @@ function activate(context) {
         else {
             // Filter hanya snippet tipe terminal untuk quick pick
             const terminalSnippets = manager.getData().snippets.filter(s => s.type === 'terminal');
-            const pick = await vscode.window.showQuickPick(terminalSnippets.map(s => ({ label: s.title, snippet: s })), { placeHolder: 'Pilih perintah terminal' });
+            const pick = await vscode.window.showQuickPick(terminalSnippets.map(s => ({ label: s.title, description: s.group, snippet: s })), { placeHolder: 'Pilih perintah terminal' });
             if (!pick) {
                 return;
             }
@@ -268,11 +323,11 @@ function activate(context) {
         term.sendText(commandToRun, true);
     }), vscode.commands.registerCommand('rajaSnippets.listSnippets', async () => {
         const items = manager.listAll();
-        const pick = await vscode.window.showQuickPick(items.map((i) => ({ label: i.title, snippet: i })), { placeHolder: 'Select snippet' });
+        const pick = await vscode.window.showQuickPick(items.map((i) => ({ label: i.title, description: i.group })), { placeHolder: 'Select snippet' });
         if (!pick) {
             return;
         }
-        const s = pick.snippet || manager.findByTitle(pick.label);
+        const s = manager.findByTitle(pick.label);
         if (s && vscode.window.activeTextEditor) {
             await vscode.window.activeTextEditor.insertSnippet(new vscode.SnippetString(s.content));
         }
@@ -297,8 +352,10 @@ function activate(context) {
           input[type="text"], textarea, select { width:100%; box-sizing: border-box; padding:8px; margin-top:4px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); }
           textarea { min-height: 240px; font-family: monospace; white-space: pre; }
           .row { display:flex; gap:8px; margin-top:12px }
-          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer }
+          button { padding:8px 12px; border-radius:4px; border:none; cursor:pointer; display: flex; align-items: center; gap: 4px; }
           button.save { background: var(--vscode-button-background); color: var(--vscode-button-foreground) }
+          button.insert { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground) }
+          button.run { background: var(--vscode-terminal-background); color: var(--vscode-terminal-foreground) }
           button.delete { background: var(--vscode-errorForeground); color: white }
         </style>
       </head>
@@ -325,14 +382,33 @@ function activate(context) {
         </select>
 
         <div class="row">
-          <button class="save">Simpan</button>
-          <button class="insert">Sisipkan</button>
-          <button class="run">Jalankan</button>
-          <button class="delete">Hapus</button>
+          <button class="save" title="Simpan">💾 Simpan</button>
+          <button id="insertBtn" class="insert" style="display: ${snippet.type === 'code' ? 'flex' : 'none'}" title="Sisipkan">+ Sisipkan</button>
+          <button id="runBtn" class="run" style="display: ${snippet.type === 'terminal' ? 'flex' : 'none'}" title="Terminal"> Terminal ></button>
+          <button class="delete" title="Hapus">🗑️ Hapus</button>
         </div>
 
         <script>
           const vscode = acquireVsCodeApi();
+          
+          // Fungsi untuk mengubah tampilan tombol berdasarkan tipe
+          function updateButtonsVisibility(type) {
+            const insertBtn = document.querySelector('#insertBtn');
+            const runBtn = document.querySelector('#runBtn');
+            
+            if (insertBtn) {
+              insertBtn.style.display = type === 'code' ? 'flex' : 'none';
+            }
+            if (runBtn) {
+              runBtn.style.display = type === 'terminal' ? 'flex' : 'none';
+            }
+          }
+          
+          // Event listener untuk perubahan tipe
+          document.getElementById('type').addEventListener('change', (e) => {
+            updateButtonsVisibility(e.target.value);
+          });
+          
           document.querySelector('.save').addEventListener('click', () => {
             const title = document.getElementById('title').value;
             const content = document.getElementById('content').value;
@@ -340,12 +416,21 @@ function activate(context) {
             const group = document.getElementById('group').value;
             vscode.postMessage({ command: 'save', title, content, type, group });
           });
-          document.querySelector('.insert').addEventListener('click', () => {
-            vscode.postMessage({ command: 'insert' });
-          });
-          document.querySelector('.run').addEventListener('click', () => {
-            vscode.postMessage({ command: 'run' });
-          });
+          
+          const insertBtn = document.querySelector('#insertBtn');
+          if (insertBtn) {
+            insertBtn.addEventListener('click', () => {
+              vscode.postMessage({ command: 'insert' });
+            });
+          }
+          
+          const runBtn = document.querySelector('#runBtn');
+          if (runBtn) {
+            runBtn.addEventListener('click', () => {
+              vscode.postMessage({ command: 'run' });
+            });
+          }
+          
           document.querySelector('.delete').addEventListener('click', () => {
             vscode.postMessage({ command: 'delete' });
           });
@@ -447,6 +532,91 @@ function activate(context) {
                 }
                 break;
         }
+    }), 
+    // Show all snippet actions in a submenu
+    vscode.commands.registerCommand('rajaSnippets.showAllSnippetActions', async (item) => {
+        const snippet = item?.snippet;
+        if (!snippet) {
+            return;
+        }
+        const picks = [
+            { label: '$(insert) Sisipkan', description: '', action: 'insert' },
+            { label: '$(terminal) Jalankan', description: 'Jalankan di terminal', action: 'run' },
+            { label: '$(edit) Edit', description: '', action: 'edit' },
+            { label: '$(gear) Ganti Tipe', description: '', action: 'change-type' },
+            { label: '$(trash) Hapus', description: '', action: 'delete' }
+        ];
+        const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Pilih aksi untuk snippet' });
+        if (!pick) {
+            return;
+        }
+        switch (pick.action) {
+            case 'insert':
+                await vscode.commands.executeCommand('rajaSnippets.insertSnippet', { snippet });
+                break;
+            case 'run':
+                await vscode.commands.executeCommand('rajaSnippets.runSnippet', { snippet });
+                break;
+            case 'edit':
+                await vscode.commands.executeCommand('rajaSnippets.editOrDeleteSnippet', { snippet });
+                break;
+            case 'change-type':
+                await vscode.commands.executeCommand('rajaSnippets.changeSnippetType', { snippet });
+                break;
+            case 'delete':
+                await vscode.commands.executeCommand('rajaSnippets.deleteSnippet', { snippet });
+                break;
+        }
+    }), 
+    // Show group actions in a submenu
+    vscode.commands.registerCommand('rajaSnippets.showGroupActions', async (item) => {
+        const groupName = typeof item.label === 'string' ? item.label : item.label.label;
+        const picks = [
+            { label: '$(add) Tambah Snippet', description: '', action: 'add' },
+            { label: '$(refresh) Refresh Grup', description: '', action: 'refresh' },
+            { label: '$(export) Export Grup', description: '', action: 'export' },
+            { label: '$(trash) Hapus Grup', description: '', action: 'delete' }
+        ];
+        const pick = await vscode.window.showQuickPick(picks, { placeHolder: 'Pilih aksi untuk grup' });
+        if (!pick) {
+            return;
+        }
+        switch (pick.action) {
+            case 'add':
+                await vscode.commands.executeCommand('rajaSnippets.addSnippetToGroup', item);
+                break;
+            case 'refresh':
+                treeProvider.refresh();
+                vscode.window.showInformationMessage('Grup telah di-refresh.');
+                break;
+            case 'export':
+                // Export only the selected group
+                try {
+                    const data = manager.getData();
+                    const groupSnippets = data.snippets.filter(s => s.group === groupName);
+                    const exportData = {
+                        groups: [groupName],
+                        snippets: groupSnippets
+                    };
+                    const uri = await vscode.window.showSaveDialog({
+                        defaultUri: vscode.Uri.file(`${groupName}-snippets.json`),
+                        filters: { 'JSON files': ['json'] },
+                        saveLabel: 'Export Grup'
+                    });
+                    if (uri) {
+                        const fs = require('fs');
+                        fs.writeFileSync(uri.fsPath, JSON.stringify(exportData, null, 2));
+                        vscode.window.showInformationMessage(`Berhasil export ${groupSnippets.length} snippets dari grup '${groupName}'.`);
+                    }
+                }
+                catch (error) {
+                    vscode.window.showErrorMessage(`Gagal export grup: ${error.message}`);
+                }
+                break;
+            case 'delete':
+                await vscode.commands.executeCommand('rajaSnippets.deleteGroupFromTree', item);
+                break;
+        }
     }), vscode.commands.registerCommand('rajaSnippets.deleteGroup', async () => {
         const group = await manager.pickGroup();
         if (!group) {
@@ -507,9 +677,84 @@ function activate(context) {
             return;
         }
         const folder = uri[0].fsPath;
+        const snippetsFile = require('path').join(folder, 'snippets.json');
+        const fs = require('fs');
+        let message = `Snippets storage diset ke: ${folder}`;
+        // Check if snippets.json already exists in the selected folder
+        if (fs.existsSync(snippetsFile)) {
+            try {
+                const content = fs.readFileSync(snippetsFile, 'utf8');
+                const data = JSON.parse(content);
+                const snippetCount = data.snippets ? data.snippets.length : 0;
+                const groupCount = data.groups ? data.groups.length : 0;
+                message = `Snippets storage diset ke: ${folder}. Menggunakan file yang sudah ada dengan ${snippetCount} snippet di ${groupCount} grup.`;
+            }
+            catch (e) {
+                message = `Snippets storage diset ke: ${folder}. File snippets.json ditemukan tapi tidak valid, akan membuat file baru.`;
+            }
+        }
         await manager.setStoragePath(folder);
-        vscode.window.showInformationMessage(`Snippets storage diset ke: ${folder}`);
+        vscode.window.showInformationMessage(message);
         treeProvider.refresh();
+    }), vscode.commands.registerCommand('rajaSnippets.exportSnippets', async () => {
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('snippets.json'),
+            filters: { 'JSON files': ['json'] },
+            saveLabel: 'Export Snippets'
+        });
+        if (!uri) {
+            return;
+        }
+        try {
+            const data = manager.getData();
+            const content = JSON.stringify(data, null, 2);
+            fs.writeFileSync(uri.fsPath, content, 'utf8');
+            vscode.window.showInformationMessage(`Berhasil export ${data.snippets.length} snippets ke ${uri.fsPath}`);
+        }
+        catch (error) {
+            vscode.window.showErrorMessage(`Gagal export snippets: ${error.message}`);
+        }
+    }), vscode.commands.registerCommand('rajaSnippets.importSnippets', async () => {
+        const uri = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: { 'JSON files': ['json'] },
+            openLabel: 'Import Snippets'
+        });
+        if (!uri || uri.length === 0) {
+            return;
+        }
+        try {
+            const content = fs.readFileSync(uri[0].fsPath, 'utf8');
+            const importData = JSON.parse(content);
+            if (!importData.snippets || !Array.isArray(importData.snippets)) {
+                throw new Error('File tidak valid: tidak ada array snippets');
+            }
+            const currentData = manager.getData();
+            // Tanyakan apakah ingin merge atau replace
+            const action = await vscode.window.showQuickPick([
+                { label: 'Merge', description: 'Gabungkan dengan snippets yang ada' },
+                { label: 'Replace', description: 'Ganti semua snippets yang ada' }
+            ], { placeHolder: 'Pilih aksi import' });
+            if (!action) {
+                return;
+            }
+            if (action.label === 'Merge') {
+                // Merge snippets
+                await manager.importSnippets(importData.snippets);
+                vscode.window.showInformationMessage(`Berhasil mengimpor ${importData.snippets.length} snippets (merged)`);
+            }
+            else {
+                // Replace all snippets
+                await manager.replaceSnippets(importData.snippets);
+                vscode.window.showInformationMessage(`Berhasil mengimpor ${importData.snippets.length} snippets (replaced)`);
+            }
+            treeProvider.refresh();
+        }
+        catch (error) {
+            vscode.window.showErrorMessage(`Gagal import snippets: ${error.message}`);
+        }
     }));
 }
 exports.activate = activate;

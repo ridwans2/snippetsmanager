@@ -22,8 +22,8 @@ class SnippetManager {
         }
         fs.mkdirSync(newDir, { recursive: true });
         const newFile = path.join(newDir, 'snippets.json');
-        // If current file exists, copy it to new location
-        if (fs.existsSync(this.dataFile)) {
+        // If current file exists and new file doesn't exist, copy it to new location
+        if (fs.existsSync(this.dataFile) && !fs.existsSync(newFile)) {
             try {
                 fs.copyFileSync(this.dataFile, newFile);
             }
@@ -31,8 +31,20 @@ class SnippetManager {
                 // ignore copy errors, will write default below if needed
             }
         }
-        // Ensure there's a file at newFile
-        if (!fs.existsSync(newFile)) {
+        // If new file already exists, use it instead of overwriting
+        if (fs.existsSync(newFile)) {
+            // Check if the existing file has valid data
+            try {
+                const content = fs.readFileSync(newFile, 'utf8');
+                JSON.parse(content); // Just to validate it's valid JSON
+            }
+            catch (e) {
+                // If invalid JSON, create a new default file
+                fs.writeFileSync(newFile, JSON.stringify({ groups: ['default'], snippets: [] }, null, 2));
+            }
+        }
+        else {
+            // Ensure there's a file at newFile
             fs.writeFileSync(newFile, JSON.stringify({ groups: ['default'], snippets: [] }, null, 2));
         }
         this.dataFile = newFile;
@@ -189,6 +201,16 @@ class SnippetManager {
         </body>
         </html>
     `;
+    }
+    async importSnippets(snippets) {
+        const data = this.getData();
+        data.snippets.push(...snippets);
+        await this.saveData(data);
+    }
+    async replaceSnippets(snippets) {
+        const data = this.getData();
+        data.snippets = snippets;
+        await this.saveData(data);
     }
 }
 exports.SnippetManager = SnippetManager;
